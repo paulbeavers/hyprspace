@@ -72,37 +72,44 @@ script can do for you.
 
 ### The macOS menu bar
 
-macOS draws its menu bar above every other window, SketchyBar included — there is
-no z-order trick that wins. So the script **measures** whether the menu bar is
-actually occupying the top of the screen (full screen height minus AppKit's
-`visibleFrame`) and places the bar accordingly:
+macOS draws its menu bar above every window, SketchyBar included — no window
+level available to a normal app wins, so it cannot be covered. The script hides
+it instead, via `SLSSetMenuBarAutohideEnabled` in the private SkyLight framework
+(loaded by `dlopen`/`dlsym`, so a missing symbol degrades to a warning rather
+than a build failure).
 
-| Menu bar | Result |
-| --- | --- |
-| hidden | bar floats flush at the top, Hyprland-style |
-| visible | bar is parked just below it, so nothing overlaps |
-
-AeroSpace's `gaps.outer.top` is derived from whichever case applies, so windows
-never slide underneath.
-
-The script tries to hide the menu bar (`_HIHideMenuBar` **and**
-`AppleMenuBarVisibleInFullscreen` — "always hide" is two keys, not one). That pref
-has historically needed a logout to take effect, and on macOS Tahoe it may not be
-honoured at all, since the setting migrated into Control Center. If it doesn't
-take, the script says so and falls back to positioning.
-
-To reclaim the top of the screen, set it by hand:
-
-> System Settings ▸ Control Center ▸ Menu Bar ▸
-> "Automatically hide and show the menu bar" ▸ **Always**
-
-then rerun `./hyprspace.sh --configs-only` to move the bar back up.
-
-To undo the pref entirely:
+That flag is **WindowServer state, not a preference** — it resets on reboot. So
+the script compiles a small helper to `~/.config/hyprspace/hyprspace-menubar` and
+AeroSpace re-runs it at startup:
 
 ```sh
-defaults write NSGlobalDomain _HIHideMenuBar -bool false
+~/.config/hyprspace/hyprspace-menubar --hide     # hide
+~/.config/hyprspace/hyprspace-menubar --show     # show
+~/.config/hyprspace/hyprspace-menubar --toggle   # toggle  (bound to alt+shift+M)
 ```
+
+It also writes the matching preferences (`_HIHideMenuBar`,
+`AppleMenuBarVisibleInFullscreen`, and Control Center's `AutoHideMenuBarOption`)
+so the state survives a logout. `NSGlobalDomain` is not addressable through
+`UserDefaults(suiteName:)`, so those go through `CFPreferences`.
+
+**Reaching the menu bar when it's hidden:** push the pointer into the very top
+edge to reveal it, or press **Ctrl+F2** (`Fn+Ctrl+F2` on a laptop keyboard) to
+move focus there from the keyboard. `alt+shift+M` brings it back permanently.
+
+### The notch
+
+On a notched MacBook the centre of the bar sits behind the camera housing. The
+script measures `NSScreen.safeAreaInsets.top` and adapts:
+
+| Display | Bar |
+| --- | --- |
+| notched | full-width, flush at `y=0`, square corners, **centre left empty** |
+| no notch | floating rounded bar with margins and a border |
+
+All modules live on the left (workspaces, mode, focused app) and right (memory,
+CPU, Wi-Fi, volume, battery, clock). Nothing is ever placed in the centre on a
+notched machine. `gaps.outer.top` is derived from whichever layout applies.
 
 ## Retheming
 

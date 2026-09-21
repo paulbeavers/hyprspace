@@ -24,10 +24,13 @@
 #    --keep-menubar   don't try to auto-hide the macOS menu bar
 #    -h | --help
 #
-#  The macOS menu bar always draws above every window, SketchyBar included.
-#  The script measures whether it is actually occupying the top of the screen
-#  and places the bar accordingly — below it if visible, flush at the top if
-#  hidden — so the two can never overlap on any macOS version.
+#  The macOS menu bar always draws above every window, SketchyBar included,
+#  so the script hides it outright (SkyLight) rather than fighting z-order,
+#  and reasserts that on every AeroSpace start. alt+shift+M toggles it back.
+#
+#  On a notched display the bar goes full-width and flush at y=0 with its
+#  centre left empty, because the notch makes the middle unusable. Without a
+#  notch it becomes the floating rounded Hyprland-style bar.
 #
 # ============================================================================
 
@@ -248,52 +251,137 @@ fi
 # ===========================================================================
 step "macOS menu bar"
 
-# Reserved vertical space = full screen height - visible frame height.
-# Non-zero means the menu bar is still taking up the top of the screen.
-measure_reserved_top() {
-  osascript 2>/dev/null <<'PROBE' || echo ""
-use framework "AppKit"
-set scr to current application's NSScreen's mainScreen()
-set f to scr's frame()
-set v to scr's visibleFrame()
-return ((item 2 of item 2 of f) - (item 2 of item 2 of v)) as string
-PROBE
-}
-
+# --- persist the setting across logins -------------------------------------
+# These are what System Settings writes. On Tahoe the menu bar workflow
+# migrated into Control Center (AutoHideMenuBarOption); the NSGlobalDomain
+# keys are the pre-Tahoe equivalents. Writing all three covers both eras,
+# but none of them apply to the *running* WindowServer — hence the step below.
 if (( HIDE_MENUBAR )) && ! (( DRY_RUN )); then
-  # "Always hide" is two keys, not one — _HIHideMenuBar alone leaves the
-  # full-screen case set and the GUI showing a mixed state.
   defaults write NSGlobalDomain _HIHideMenuBar -bool true 2>/dev/null || true
   defaults write NSGlobalDomain AppleMenuBarVisibleInFullscreen -bool false 2>/dev/null || true
-  killall SystemUIServer 2>/dev/null || true
-  sleep 2
-elif (( HIDE_MENUBAR )); then
-  info "would set _HIHideMenuBar / AppleMenuBarVisibleInFullscreen"
+  defaults write com.apple.controlcenter AutoHideMenuBarOption -int 1 2>/dev/null || true
 fi
 
-RESERVED_TOP="$(measure_reserved_top | cut -d. -f1)"
-case "${RESERVED_TOP:-}" in
-  ''|*[!0-9]*) RESERVED_TOP=0; MEASURED=0 ;;
-  *)           MEASURED=1 ;;
-esac
+# --- apply it right now, and measure the notch -----------------------------
+# `defaults write` alone is inert until logout: System Settings also pokes the
+# WindowServer. SLSSetMenuBarAutohideEnabled is that poke. It lives in the
+# private SkyLight framework, so it is loaded by dlopen/dlsym rather than
+# linked — if Apple ever drops the symbol this degrades to a warning instead
+# of a build error.
+HELPER_DIR="$HOME/.config/hyprspace"
+HELPER_BIN="$HELPER_DIR/hyprspace-menubar"
+HELPER="$(mktemp -t hyprspace_mb).swift"
+cat > "$HELPER" <<'SWIFT'
+import Foundation
+import CoreGraphics
+import AppKit
 
-if (( ! MEASURED )); then
-  warn "could not measure the menu bar — assuming it is hidden"
-elif (( RESERVED_TOP > 0 )); then
-  # Still there. Park the bar underneath it instead of fighting for z-order.
-  BAR_Y_OFFSET=$(( RESERVED_TOP + BAR_Y_OFFSET ))
-  warn "menu bar still visible (${RESERVED_TOP}px) — bar moved below it"
-  info "for the full look, set it to Always hide:"
-  info "  System Settings ▸ Control Center ▸ Menu Bar ▸"
-  info "  \"Automatically hide and show the menu bar\" ▸ Always"
-  info "then rerun: $(basename "$0") --configs-only"
+let hideRequested = CommandLine.arguments.contains("--hide")
+var didHide = false
+
+let showRequested   = CommandLine.arguments.contains("--show")
+let toggleRequested = CommandLine.arguments.contains("--toggle")
+
+if (hideRequested || showRequested || toggleRequested), let h = dlopen(
+     "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_NOW) {
+  typealias MainConnFn    = @convention(c) () -> Int32
+  typealias SetAutohideFn = @convention(c) (Int32, Bool) -> Int32
+  typealias GetAutohideFn = @convention(c) (Int32, UnsafeMutablePointer<Bool>) -> Int32
+  if let pc = dlsym(h, "SLSMainConnectionID"),
+     let pa = dlsym(h, "SLSSetMenuBarAutohideEnabled") {
+    let cid = unsafeBitCast(pc, to: MainConnFn.self)()
+    var want = hideRequested
+    if toggleRequested, let pg = dlsym(h, "SLSGetMenuBarAutohideEnabled") {
+      var cur = false
+      _ = unsafeBitCast(pg, to: GetAutohideFn.self)(cid, &cur)
+      want = !cur
+    }
+    didHide = unsafeBitCast(pa, to: SetAutohideFn.self)(cid, want) == 0
+    // Keep the on-disk preferences in step so the state survives a reboot.
+    // NSGlobalDomain is not addressable via UserDefaults(suiteName:) — it has
+    // to go through CFPreferences' kCFPreferencesAnyApplication, or the two
+    // prefs silently drift apart.
+    CFPreferencesSetValue("_HIHideMenuBar" as CFString, want as CFBoolean,
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser,
+                          kCFPreferencesAnyHost)
+    CFPreferencesSetValue("AppleMenuBarVisibleInFullscreen" as CFString, !want as CFBoolean,
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser,
+                          kCFPreferencesAnyHost)
+    CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser,
+                             kCFPreferencesAnyHost)
+    let cc = UserDefaults(suiteName: "com.apple.controlcenter")
+    cc?.set(want ? 1 : 0, forKey: "AutoHideMenuBarOption")
+    cc?.synchronize()
+  }
+}
+
+// safeAreaInsets.top is non-zero only on notched displays — this is how we
+// know whether the centre of the bar is physically unusable.
+var notch = 0.0
+if #available(macOS 12.0, *), let s = NSScreen.main { notch = s.safeAreaInsets.top }
+print("\(didHide ? 1 : 0) \(Int(notch.rounded()))")
+SWIFT
+
+MENUBAR_HIDDEN=0
+NOTCH=0
+if (( DRY_RUN )); then
+  info "would compile $HELPER_BIN, hide the menu bar and measure the notch"
+elif command -v swiftc >/dev/null 2>&1; then
+  # Compile once and keep it. The autohide flag is WindowServer state, not a
+  # preference, so it resets on reboot — AeroSpace re-runs this binary at
+  # startup (see after-startup-command) to reassert it.
+  mkdir -p "$HELPER_DIR"
+  if swiftc -O -o "$HELPER_BIN" "$HELPER" 2>/dev/null; then
+    HELPER_ARGS=(); (( HIDE_MENUBAR )) && HELPER_ARGS=(--hide)
+    read -r MENUBAR_HIDDEN NOTCH <<<"$("$HELPER_BIN" "${HELPER_ARGS[@]}" 2>/dev/null || echo "0 0")"
+    case "$MENUBAR_HIDDEN" in ''|*[!0-9]*) MENUBAR_HIDDEN=0 ;; esac
+    case "$NOTCH"          in ''|*[!0-9]*) NOTCH=0 ;; esac
+    ok "menu bar helper built: ${HELPER_BIN/#$HOME/\~}"
+  else
+    warn "could not compile the menu bar helper"
+  fi
 else
-  ok "menu bar hidden — bar floats at the top"
+  warn "swiftc not available — cannot hide the menu bar without a logout"
+fi
+rm -f "$HELPER"
+
+if (( HIDE_MENUBAR )) && (( MENUBAR_HIDDEN )); then
+  ok "menu bar hidden (and set to stay hidden across logins)"
+elif (( HIDE_MENUBAR )); then
+  warn "could not hide the menu bar live — log out and back in to apply"
+else
+  info "menu bar left alone (--keep-menubar)"
 fi
 
-# Top gap tracks whatever the bar ended up doing.
+# --- geometry --------------------------------------------------------------
+# Two different bars, picked by hardware:
+#
+#   notched display -> full-width bar flush at y=0, square corners, tall
+#                      enough to cover the notch strip. The notch occupies
+#                      the centre, so the centre is left empty and all
+#                      modules live on the left and right of it.
+#   no notch        -> the floating rounded Hyprland-style bar.
+if (( NOTCH > 0 )); then
+  BAR_Y_OFFSET=0
+  BAR_MARGIN=0
+  BAR_RADIUS=0
+  BAR_BORDER_W=0
+  (( BAR_HEIGHT < NOTCH + 2 )) && BAR_HEIGHT=$(( NOTCH + 2 ))
+  ok "notch detected (${NOTCH}px) — full-width bar, centre kept clear"
+else
+  BAR_RADIUS=12
+  BAR_BORDER_W=2
+  ok "no notch — floating rounded bar"
+fi
+
+# If the menu bar is still up, park the bar below it rather than under it.
+if (( HIDE_MENUBAR )) && (( ! MENUBAR_HIDDEN )) && (( NOTCH == 0 )); then
+  BAR_Y_OFFSET=$(( BAR_Y_OFFSET + 32 ))
+  warn "bar offset below the still-visible menu bar"
+fi
+
 GAP_TOP=$(( BAR_HEIGHT + BAR_Y_OFFSET + GAP_INNER ))
-info "bar y_offset=${BAR_Y_OFFSET}  aerospace gaps.outer.top=${GAP_TOP}"
+info "bar height=${BAR_HEIGHT} y_offset=${BAR_Y_OFFSET} margin=${BAR_MARGIN}  gaps.outer.top=${GAP_TOP}"
 
 # ===========================================================================
 # 5. Back up whatever is already there
@@ -362,6 +450,9 @@ gaps.outer.right      = ${BAR_MARGIN}
 after-startup-command = [
   'exec-and-forget /bin/bash -lc "command -v borders >/dev/null && borders &"',
   'exec-and-forget /bin/bash -lc "command -v sketchybar >/dev/null && sketchybar --reload"',
+  # Menu bar autohide is WindowServer state, not a preference — it resets on
+  # reboot, so reassert it every time AeroSpace starts.
+  'exec-and-forget /bin/bash -lc "[ -x ~/.config/hyprspace/hyprspace-menubar ] && ~/.config/hyprspace/hyprspace-menubar --hide"',
 ]
 
 # Push the focused workspace into SketchyBar on every change.
@@ -476,6 +567,10 @@ run = 'layout floating'
 
     # Multi-monitor
     alt-shift-tab = 'move-workspace-to-monitor --wrap-around next'
+
+    # Show/hide the macOS menu bar (it reveals on hover at the top edge,
+    # but SketchyBar sits in that strip, so this is the reliable way back).
+    alt-shift-m = 'exec-and-forget /bin/bash -lc "~/.config/hyprspace/hyprspace-menubar --toggle"'
 
     # Service / resize submode
     alt-shift-semicolon = 'mode service'
@@ -593,13 +688,12 @@ sketchybar --bar \\
   padding_right=8 \\
   margin=${BAR_MARGIN} \\
   y_offset=${BAR_Y_OFFSET} \\
-  corner_radius=12 \\
-  border_width=2 \\
+  corner_radius=${BAR_RADIUS} \\
+  border_width=${BAR_BORDER_W} \\
   border_color=\$BAR_BORDER_COLOR \\
   color=\$BAR_COLOR \\
   shadow=on \\
   blur_radius=30 \\
-  notch_width=200 \\
   topmost=window
 
 # --- defaults --------------------------------------------------------------
@@ -675,9 +769,18 @@ sketchybar --add item front_app left \\
            --subscribe front_app front_app_switched
 
 # ===========================================================================
-# CENTER — clock
+# CENTRE — deliberately empty.
+#
+# On a notched display the centre of the bar is behind the camera housing,
+# so anything placed there is physically unreadable. The clock lives on the
+# right instead. Nothing goes here.
 # ===========================================================================
-sketchybar --add item clock center \\
+
+# ===========================================================================
+# RIGHT — status modules. The FIRST item added is the RIGHTMOST, so this
+# block reads right-to-left: clock, battery, volume, wifi, cpu, memory.
+# ===========================================================================
+sketchybar --add item clock right \\
            --set clock \\
                  update_freq=10 \\
                  icon="󰥔" \\
@@ -687,9 +790,6 @@ sketchybar --add item clock center \\
                  background.color=\$SURFACE0 \\
                  script="\$PLUGIN_DIR/clock.sh"
 
-# ===========================================================================
-# RIGHT — status modules (rightmost item is added first)
-# ===========================================================================
 sketchybar --add item battery right \\
            --set battery \\
                  update_freq=120 \\
@@ -983,11 +1083,8 @@ ${C_B}Keybinds${C_RST} ${C_DIM}(ALT stands in for Hyprland's SUPER)${C_RST}
   ${C_BLU}alt + R${C_RST}             resize submap    ${C_DIM}(Esc to exit)${C_RST}
   ${C_BLU}alt + shift + ;${C_RST}     service mode     ${C_DIM}(Esc reloads config)${C_RST}
 
-${C_B}Menu bar${C_RST}  ${C_DIM}macOS draws it above every window, so the bar is placed to avoid it.${C_RST}
-          To reclaim the top of the screen, set it to hide always:
-            System Settings ▸ Control Center ▸ Menu Bar ▸
-            "Automatically hide and show the menu bar" ▸ Always
-          then rerun ${C_DIM}$(basename "$0") --configs-only${C_RST} to move the bar up.
+${C_B}Menu bar${C_RST}  hidden via SkyLight, reasserted by AeroSpace on every start.
+          Show it again: ${C_DIM}~/.config/hyprspace/hyprspace-menubar --show${C_RST}
 
 ${C_B}Retheme${C_RST}   edit the PALETTE block at the top of this script, rerun with
            ${C_DIM}bash $(basename "$0") --configs-only${C_RST}
