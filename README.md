@@ -3,8 +3,8 @@
 Make macOS look and behave like [Hyprland](https://hypr.land), using
 [AeroSpace](https://github.com/nikitabobko/AeroSpace) as the tiling engine.
 
-One script. No dotfile framework, no submodules, no symlink manager — `hyprspace.sh`
-installs the packages and writes every config file itself.
+One script. No dotfile framework, no submodules, no symlink manager —
+`hyprspace.sh` installs the packages and writes every config file itself.
 
 ```sh
 git clone https://github.com/<you>/hyprspace.git
@@ -22,17 +22,38 @@ Theme is **Catppuccin Mocha**.
 | --- | --- |
 | Hyprland (tiling WM) | **AeroSpace** — gaps, workspaces, i3-style binds |
 | Border gradients | **JankyBorders** — blue→mauve gradient on the focused window |
-| Waybar | **SketchyBar** — floating rounded bar, workspace pills, status modules |
-| Nerd Font glyphs | **JetBrainsMono Nerd Font** + **sketchybar-app-font** |
+| Nerd Font glyphs | **JetBrainsMono Nerd Font** |
 
-The bar carries workspace pills (active / occupied / empty, like Hyprland's), the
-focused app with its real icon, a binding-mode badge, a centred clock, and
-CPU / memory / Wi-Fi / volume / battery on the right.
+## Why there is no status bar
+
+The obvious move is a Waybar clone — SketchyBar — pinned to the top. It isn't
+worth it, and this config deliberately leaves it out.
+
+The macOS menu bar owns the top strip. It draws above every window level an
+app can reach, so it cannot be covered, and hiding it is unreliable on current
+macOS: the documented preferences (`_HIHideMenuBar`,
+`AppleMenuBarVisibleInFullscreen`, Control Center's `AutoHideMenuBarOption`)
+only take effect at login, and `SLSSetMenuBarAutohideEnabled` in the private
+SkyLight framework returns success while `SLSIsMenuBarVisibleOnSpace` keeps
+reporting the bar visible.
+
+That leaves three options, none of them good: stack a second bar underneath
+the menu bar (redundant, and it eats ~70px of vertical space), move the bar to
+the bottom (works, but duplicates a clock, battery and Wi-Fi you already have),
+or keep fighting the OS.
+
+On a notched MacBook it gets worse — the centre of a top bar sits behind the
+camera housing, so the middle third is unusable.
+
+So: the menu bar keeps doing its job, and this config spends its effort on the
+part that actually makes macOS feel like Hyprland — keyboard-driven tiling with
+gaps, and a gradient on the focused window. If you want a bar anyway, SketchyBar
+installs cleanly alongside this; it just isn't the default.
 
 ## Keybinds
 
 AeroSpace uses **ALT** as the modifier — macOS reserves far too much of CMD for
-this to work on SUPER. Everything else maps 1:1 onto Hyprland's defaults.
+SUPER to work. Everything else maps 1:1 onto Hyprland's defaults.
 
 | Key | Action |
 | --- | --- |
@@ -60,105 +81,49 @@ this to work on SUPER. Everything else maps 1:1 onto Hyprland's defaults.
 | `--dry-run` | print every action, change nothing |
 | `--configs-only` | skip Homebrew and packages, just rewrite configs |
 | `--no-backup` | skip backing up existing configs |
-| `--keep-menubar` | leave the macOS menu bar visible |
 | `-h`, `--help` | usage |
 
 ## After the first run
 
 macOS will prompt for **Accessibility** permission for AeroSpace
-(System Settings ▸ Privacy & Security ▸ Accessibility). **Nothing tiles until you
-grant it and restart AeroSpace.** This is a macOS requirement, not something the
-script can do for you.
+(System Settings ▸ Privacy & Security ▸ Accessibility). **Nothing tiles until
+you grant it and restart AeroSpace.** This is a macOS requirement, not
+something the script can do for you.
 
-### The macOS menu bar
+## A note on gaps
 
-macOS draws its menu bar above every window, SketchyBar included — no window
-level available to a normal app wins, so it cannot be covered. The script hides
-it instead, via `SLSSetMenuBarAutohideEnabled` in the private SkyLight framework
-(loaded by `dlopen`/`dlsym`, so a missing symbol degrades to a warning rather
-than a build failure).
-
-That flag is **WindowServer state, not a preference** — it resets on reboot. So
-the script compiles a small helper to `~/.config/hyprspace/hyprspace-menubar` and
-AeroSpace re-runs it at startup:
-
-```sh
-~/.config/hyprspace/hyprspace-menubar --hide     # hide
-~/.config/hyprspace/hyprspace-menubar --show     # show
-~/.config/hyprspace/hyprspace-menubar --toggle   # toggle  (bound to alt+shift+M)
-```
-
-It also writes the matching preferences (`_HIHideMenuBar`,
-`AppleMenuBarVisibleInFullscreen`, and Control Center's `AutoHideMenuBarOption`)
-so the state survives a logout. `NSGlobalDomain` is not addressable through
-`UserDefaults(suiteName:)`, so those go through `CFPreferences`.
-
-**Reaching the menu bar when it's hidden:** push the pointer into the very top
-edge to reveal it, or press **Ctrl+F2** (`Fn+Ctrl+F2` on a laptop keyboard) to
-move focus there from the keyboard. `alt+shift+M` brings it back permanently.
-
-### The notch
-
-On a notched MacBook the centre of the bar sits behind the camera housing. The
-script measures `NSScreen.safeAreaInsets.top` and adapts:
-
-| Display | Bar |
-| --- | --- |
-| notched | full-width, flush at `y=0`, square corners, **centre left empty** |
-| no notch | floating rounded bar with margins and a border |
-
-All modules live on the left (workspaces, mode, focused app) and right (memory,
-CPU, Wi-Fi, volume, battery, clock). Nothing is ever placed in the centre on a
-notched machine. `gaps.outer.top` is derived from whichever layout applies.
+AeroSpace tiles inside macOS's `visibleFrame`, which **already** excludes the
+menu bar and the Dock. So `gaps.outer.top` is a true gap on top of that — it
+must not include the menu bar height. Adding it leaves a dead strip the height
+of the menu bar between the top of the screen and the first window.
 
 ## Retheming
 
-The palette lives in one block at the top of `hyprspace.sh`. Change the hex values,
-then:
+The palette lives in one block at the top of `hyprspace.sh`. Change the hex
+values, then:
 
 ```sh
 ./hyprspace.sh --configs-only
 ```
 
-Everything — bar, workspace pills, status colors, window border gradient — is
-generated from those variables, so a retheme is a single edit.
-
-Bar geometry is in the same block (`BAR_HEIGHT`, `BAR_Y_OFFSET`, `BAR_MARGIN`,
-`GAP_INNER`). AeroSpace's top gap is *derived* from them, so windows can never
-end up underneath the bar.
-
 ## Safety
 
 Re-running is safe. Existing configs are copied to
-`~/.hyprspace-backup/<timestamp>/` before anything is overwritten, package installs
-are skipped when already present, and `--dry-run` shows the whole plan first.
+`~/.hyprspace-backup/<timestamp>/` before anything is overwritten, package
+installs are skipped when already present, and `--dry-run` shows the whole plan
+first.
 
 ## Files written
 
 ```
 ~/.aerospace.toml
 ~/.config/borders/bordersrc
-~/.config/sketchybar/sketchybarrc
-~/.config/sketchybar/colors.sh
-~/.config/sketchybar/plugins/*.sh
 ```
-
-## Notes
-
-- **Wi-Fi module shows "Wi-Fi", not the SSID.** Reading the SSID on current macOS
-  requires a Location Services grant and silently returns empty without it, so the
-  module reports link type instead.
-- **CPU** is sampled as summed per-process `%cpu` over core count rather than
-  `top -l 2`, which would block for a full sample interval on every tick.
-- Blur behind the bar is SketchyBar's own `blur_radius`; macOS has no compositor
-  hook for per-window blur, so Hyprland-style window blur isn't reproducible.
 
 ## Credits
 
 [AeroSpace](https://github.com/nikitabobko/AeroSpace) ·
-[SketchyBar](https://github.com/FelixKratz/SketchyBar) ·
 [JankyBorders](https://github.com/FelixKratz/JankyBorders) ·
-[sketchybar-app-font](https://github.com/kvndrsslr/sketchybar-app-font) ·
 [Catppuccin](https://github.com/catppuccin/catppuccin)
 
 ## License
