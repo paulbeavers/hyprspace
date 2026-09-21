@@ -7,9 +7,10 @@ One script. No dotfile framework, no submodules, no symlink manager —
 `hyprspace.sh` installs the packages and writes every config file itself.
 
 ```sh
-git clone https://github.com/<you>/hyprspace.git
+git clone git@github.com:paulbeavers/hyprspace.git
 cd hyprspace
-./hyprspace.sh
+./hyprspace.sh          # install
+./uninstall.sh          # undo it all
 ```
 
 Theme is **Catppuccin Mocha**.
@@ -105,6 +106,45 @@ values, then:
 ```sh
 ./hyprspace.sh --configs-only
 ```
+
+## Uninstalling
+
+`uninstall.sh` reverses everything the installer did: it stops JankyBorders and
+quits AeroSpace, uninstalls the packages, deletes the config files, and clears
+the macOS menu-bar preferences (by *deleting* the keys, so macOS falls back to
+its own defaults rather than a guessed value).
+
+```sh
+./uninstall.sh --dry-run    # show the plan, change nothing
+./uninstall.sh              # remove packages + configs (asks first)
+./uninstall.sh --restore    # also put your ORIGINAL config back
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--dry-run` | print every action, change nothing |
+| `-y`, `--yes` | skip the confirmation prompt |
+| `--restore` | restore the original pre-hyprspace config from the oldest backup |
+| `--keep-packages` | remove configs only, leave Homebrew packages |
+| `--keep-configs` | remove packages only, leave config files |
+| `--keep-font` | keep JetBrainsMono Nerd Font |
+| `--untap` | also remove the Homebrew taps |
+| `--purge-backups` | delete `~/.hyprspace-backup` when finished |
+
+`--restore` uses the **oldest** backup on purpose — that's the one taken on the
+very first install, i.e. your genuine pre-hyprspace config. Later backups are
+just snapshots of hyprspace's own output from repeated runs.
+
+`--untap` refuses to remove a tap while any package from it is still installed,
+since that would leave Homebrew unable to resolve the formula.
+
+It also cleans up after older revisions of this repo, which installed SketchyBar
+and hid the menu bar — so it leaves no residue even on a machine set up before
+those were dropped.
+
+Deliberately left alone: Homebrew itself, your terminal emulator (hyprspace
+never installed it), and AeroSpace's Accessibility grant, which only you can
+revoke in System Settings.
 
 ## Safety
 
