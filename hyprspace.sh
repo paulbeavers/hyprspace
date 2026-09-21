@@ -21,8 +21,13 @@
 #    --dry-run        print what would happen, touch nothing
 #    --configs-only   skip Homebrew/package installation, just rewrite configs
 #    --no-backup      don't back up existing configs (default: always back up)
-#    --keep-menubar   don't auto-hide the macOS menu bar (see note below)
+#    --keep-menubar   don't try to auto-hide the macOS menu bar
 #    -h | --help
+#
+#  The macOS menu bar always draws above every window, SketchyBar included.
+#  The script measures whether it is actually occupying the top of the screen
+#  and places the bar accordingly — below it if visible, flush at the top if
+#  hidden — so the two can never overlap on any macOS version.
 #
 # ============================================================================
 
@@ -224,7 +229,74 @@ if [[ -z "$TERMINAL_CMD" ]]; then
 fi
 
 # ===========================================================================
-# 4. Back up whatever is already there
+# 4. macOS menu bar
+#
+# This has to run BEFORE the configs are written, because the bar's y_offset
+# and AeroSpace's top gap are both derived from whether the menu bar is
+# actually occupying the top of the screen.
+#
+# macOS always draws its menu bar above every other window, SketchyBar
+# included — there is no z-order trick that wins. So there are exactly two
+# correct outcomes, and we measure which one we got rather than assume:
+#
+#   menu bar hidden  -> bar floats at the very top, Hyprland-style
+#   menu bar visible -> bar is parked just below it, so nothing overlaps
+#
+# _HIHideMenuBar has historically needed a logout to take effect, and on
+# Tahoe it may not be honoured at all (the setting migrated into Control
+# Center). Measuring is the only reliable answer.
+# ===========================================================================
+step "macOS menu bar"
+
+# Reserved vertical space = full screen height - visible frame height.
+# Non-zero means the menu bar is still taking up the top of the screen.
+measure_reserved_top() {
+  osascript 2>/dev/null <<'PROBE' || echo ""
+use framework "AppKit"
+set scr to current application's NSScreen's mainScreen()
+set f to scr's frame()
+set v to scr's visibleFrame()
+return ((item 2 of item 2 of f) - (item 2 of item 2 of v)) as string
+PROBE
+}
+
+if (( HIDE_MENUBAR )) && ! (( DRY_RUN )); then
+  # "Always hide" is two keys, not one — _HIHideMenuBar alone leaves the
+  # full-screen case set and the GUI showing a mixed state.
+  defaults write NSGlobalDomain _HIHideMenuBar -bool true 2>/dev/null || true
+  defaults write NSGlobalDomain AppleMenuBarVisibleInFullscreen -bool false 2>/dev/null || true
+  killall SystemUIServer 2>/dev/null || true
+  sleep 2
+elif (( HIDE_MENUBAR )); then
+  info "would set _HIHideMenuBar / AppleMenuBarVisibleInFullscreen"
+fi
+
+RESERVED_TOP="$(measure_reserved_top | cut -d. -f1)"
+case "${RESERVED_TOP:-}" in
+  ''|*[!0-9]*) RESERVED_TOP=0; MEASURED=0 ;;
+  *)           MEASURED=1 ;;
+esac
+
+if (( ! MEASURED )); then
+  warn "could not measure the menu bar — assuming it is hidden"
+elif (( RESERVED_TOP > 0 )); then
+  # Still there. Park the bar underneath it instead of fighting for z-order.
+  BAR_Y_OFFSET=$(( RESERVED_TOP + BAR_Y_OFFSET ))
+  warn "menu bar still visible (${RESERVED_TOP}px) — bar moved below it"
+  info "for the full look, set it to Always hide:"
+  info "  System Settings ▸ Control Center ▸ Menu Bar ▸"
+  info "  \"Automatically hide and show the menu bar\" ▸ Always"
+  info "then rerun: $(basename "$0") --configs-only"
+else
+  ok "menu bar hidden — bar floats at the top"
+fi
+
+# Top gap tracks whatever the bar ended up doing.
+GAP_TOP=$(( BAR_HEIGHT + BAR_Y_OFFSET + GAP_INNER ))
+info "bar y_offset=${BAR_Y_OFFSET}  aerospace gaps.outer.top=${GAP_TOP}"
+
+# ===========================================================================
+# 5. Back up whatever is already there
 # ===========================================================================
 if (( DO_BACKUP )); then
   step "Backup"
@@ -247,7 +319,7 @@ else
 fi
 
 # ===========================================================================
-# 5. AeroSpace
+# 6. AeroSpace
 # ===========================================================================
 step "AeroSpace config"
 
@@ -438,7 +510,7 @@ run = 'layout floating'
 AEROSPACE_TOML
 
 # ===========================================================================
-# 6. JankyBorders — the Hyprland gradient glow
+# 7. JankyBorders — the Hyprland gradient glow
 # ===========================================================================
 step "JankyBorders config"
 
@@ -463,7 +535,7 @@ BORDERSRC
 run chmod +x "$BORDERS_DIR/bordersrc"
 
 # ===========================================================================
-# 7. SketchyBar — the Waybar clone
+# 8. SketchyBar — the Waybar clone
 # ===========================================================================
 step "SketchyBar config"
 
@@ -863,19 +935,6 @@ FALLBACK
 fi
 
 # ===========================================================================
-# 8. Menu bar
-# ===========================================================================
-step "macOS menu bar"
-if (( HIDE_MENUBAR )); then
-  # Without this you get two stacked bars. Reversible in
-  # System Settings > Control Center > Automatically hide and show the menu bar.
-  run defaults write NSGlobalDomain _HIHideMenuBar -bool true
-  ok "auto-hide enabled (undo: defaults write NSGlobalDomain _HIHideMenuBar -bool false)"
-else
-  warn "left visible (--keep-menubar) — it will sit above the SketchyBar"
-fi
-
-# ===========================================================================
 # 9. Start everything
 # ===========================================================================
 step "Services"
@@ -923,6 +982,12 @@ ${C_B}Keybinds${C_RST} ${C_DIM}(ALT stands in for Hyprland's SUPER)${C_RST}
   ${C_BLU}alt + Tab${C_RST}           last workspace
   ${C_BLU}alt + R${C_RST}             resize submap    ${C_DIM}(Esc to exit)${C_RST}
   ${C_BLU}alt + shift + ;${C_RST}     service mode     ${C_DIM}(Esc reloads config)${C_RST}
+
+${C_B}Menu bar${C_RST}  ${C_DIM}macOS draws it above every window, so the bar is placed to avoid it.${C_RST}
+          To reclaim the top of the screen, set it to hide always:
+            System Settings ▸ Control Center ▸ Menu Bar ▸
+            "Automatically hide and show the menu bar" ▸ Always
+          then rerun ${C_DIM}$(basename "$0") --configs-only${C_RST} to move the bar up.
 
 ${C_B}Retheme${C_RST}   edit the PALETTE block at the top of this script, rerun with
            ${C_DIM}bash $(basename "$0") --configs-only${C_RST}
