@@ -374,6 +374,9 @@ run = 'layout floating'
     # Multi-monitor
     alt-shift-tab = 'move-workspace-to-monitor --wrap-around next'
 
+    # Keybind cheatsheet (Hyprland configs conventionally bind SUPER+/)
+    alt-slash = 'exec-and-forget /bin/bash -lc "open ~/.config/hyprspace/keybinds.html"'
+
     # Submodes
     alt-shift-semicolon = 'mode service'
     alt-r               = 'mode resize'
@@ -432,7 +435,96 @@ BORDERSRC
 run chmod +x "$BORDERS_DIR/bordersrc"
 
 # ===========================================================================
-# 7. Start everything
+# 7. Keybind cheatsheet
+#
+# A self-contained HTML page opened by alt+/ . HTML rather than a dialog or a
+# terminal window because it needs no dependency, no terminal emulator, and
+# survives having more rows added to it.
+# ===========================================================================
+step "Cheatsheet"
+
+CHEAT_DIR="$HOME/.config/hyprspace"
+write_file "$CHEAT_DIR/keybinds.html" <<CHEATSHEET
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>hyprspace keybinds</title>
+<style>
+  :root {
+    --base:#1e1e2e; --mantle:#181825; --surface:#313244; --overlay:#6c7086;
+    --text:#cdd6f4; --subtext:#a6adc8; --blue:#${HEX_BLUE}; --mauve:#${HEX_MAUVE};
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:3rem 1.5rem; background:var(--base); color:var(--text);
+    font:15px/1.55 "JetBrainsMono Nerd Font","JetBrains Mono",ui-monospace,monospace;
+  }
+  .wrap { max-width:960px; margin:0 auto; }
+  h1 { margin:0 0 .25rem; font-size:1.5rem; font-weight:700;
+       background:linear-gradient(100deg,var(--blue),var(--mauve));
+       -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { color:var(--overlay); margin:0 0 2.5rem; font-size:.875rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:2rem; }
+  section { background:var(--mantle); border:1px solid var(--surface);
+            border-radius:12px; padding:1.25rem 1.5rem; }
+  h2 { margin:0 0 1rem; font-size:.75rem; letter-spacing:.09em;
+       text-transform:uppercase; color:var(--mauve); font-weight:600; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:.32rem 0; vertical-align:top; }
+  td:first-child { white-space:nowrap; padding-right:1.25rem; }
+  kbd { display:inline-block; background:var(--surface); color:var(--text);
+        border-radius:5px; padding:.1rem .45rem; font-size:.8125rem;
+        border-bottom:2px solid #11111b; }
+  td:last-child { color:var(--subtext); }
+  footer { margin-top:2.5rem; color:var(--overlay); font-size:.8125rem; text-align:center; }
+  @media (prefers-color-scheme: light) { /* deliberately dark in both */ }
+</style></head><body><div class="wrap">
+<h1>hyprspace</h1>
+<p class="sub">AeroSpace keybinds — <kbd>alt</kbd> stands in for Hyprland's SUPER</p>
+<div class="grid">
+
+<section><h2>Launch &amp; window</h2><table>
+<tr><td><kbd>alt</kbd> <kbd>↵</kbd></td><td>terminal</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>E</kbd></td><td>Finder</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>Q</kbd></td><td>close window</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>⇧</kbd> <kbd>Q</kbd></td><td>close all but current</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>V</kbd></td><td>toggle floating</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>F</kbd></td><td>fullscreen</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>S</kbd></td><td>toggle split direction</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>,</kbd></td><td>accordion layout</td></tr>
+</table></section>
+
+<section><h2>Focus &amp; move</h2><table>
+<tr><td><kbd>alt</kbd> <kbd>H</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd></td><td>focus (arrows work too)</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>⇧</kbd> <kbd>H</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd></td><td>move window</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>⌃</kbd> <kbd>H</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd></td><td>resize</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>-</kbd> / <kbd>=</kbd></td><td>shrink / grow</td></tr>
+</table></section>
+
+<section><h2>Workspaces</h2><table>
+<tr><td><kbd>alt</kbd> <kbd>1</kbd>…<kbd>9</kbd><kbd>0</kbd></td><td>switch workspace</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>⇧</kbd> <kbd>1</kbd>…<kbd>0</kbd></td><td>send window there + follow</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>⇥</kbd></td><td>last workspace</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>⌃</kbd> <kbd>←</kbd>/<kbd>→</kbd></td><td>cycle workspaces</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>⇧</kbd> <kbd>⇥</kbd></td><td>workspace to next monitor</td></tr>
+</table></section>
+
+<section><h2>Modes &amp; help</h2><table>
+<tr><td><kbd>alt</kbd> <kbd>/</kbd></td><td>this cheatsheet</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>R</kbd></td><td>resize submap — <kbd>esc</kbd> exits</td></tr>
+<tr><td><kbd>alt</kbd> <kbd>⇧</kbd> <kbd>;</kbd></td><td>service mode</td></tr>
+<tr><td style="padding-left:1rem">└ <kbd>esc</kbd></td><td>reload config</td></tr>
+<tr><td style="padding-left:1rem">└ <kbd>R</kbd></td><td>reset layout</td></tr>
+<tr><td style="padding-left:1rem">└ <kbd>F</kbd></td><td>toggle float</td></tr>
+<tr><td style="padding-left:1rem">└ <kbd>H</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd></td><td>join with neighbour</td></tr>
+</table></section>
+
+</div>
+<footer>~/.aerospace.toml · regenerate with ./hyprspace.sh --configs-only</footer>
+</div></body></html>
+CHEATSHEET
+
+# ===========================================================================
+# 8. Start everything
 # ===========================================================================
 step "Services"
 if (( DRY_RUN )); then
@@ -453,7 +545,7 @@ else
 fi
 
 # ===========================================================================
-# 8. Summary
+# 9. Summary
 # ===========================================================================
 cat <<SUMMARY
 
@@ -478,12 +570,14 @@ ${C_B}Keybinds${C_RST} ${C_DIM}(ALT stands in for Hyprland's SUPER)${C_RST}
   ${C_BLU}alt + Tab${C_RST}           last workspace
   ${C_BLU}alt + R${C_RST}             resize submap    ${C_DIM}(Esc to exit)${C_RST}
   ${C_BLU}alt + shift + ;${C_RST}     service mode     ${C_DIM}(Esc reloads config)${C_RST}
+  ${C_BLU}alt + /${C_RST}             ${C_B}show this cheatsheet${C_RST}
 
 ${C_B}Retheme${C_RST}   edit the PALETTE block at the top of this script, rerun with
            ${C_DIM}./$(basename "$0") --configs-only${C_RST}
 
 ${C_B}Files${C_RST}     ~/.aerospace.toml
            ~/.config/borders/bordersrc
+           ~/.config/hyprspace/keybinds.html
 SUMMARY
 
 if (( DO_BACKUP )) && [[ -d "$BACKUP_DIR" ]]; then

@@ -74,6 +74,7 @@ SUPER to work. Everything else maps 1:1 onto Hyprland's defaults.
 | `alt + shift + Tab` | move workspace to next monitor |
 | `alt + R` | resize submap (`Esc` exits) |
 | `alt + shift + ;` | service mode (`Esc` reloads config) |
+| `alt + /` | **show the keybind cheatsheet** |
 
 ## Flags
 
@@ -158,7 +159,12 @@ first.
 ```
 ~/.aerospace.toml
 ~/.config/borders/bordersrc
+~/.config/hyprspace/keybinds.html
 ```
+
+`alt + /` opens that last one — a themed cheatsheet of every binding, generated
+from the same palette as the borders. It's plain HTML opened in your browser, so
+it needs no terminal emulator and no extra dependency.
 
 ## Credits
 
