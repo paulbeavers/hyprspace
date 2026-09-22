@@ -162,9 +162,30 @@ first.
 ~/.config/hyprspace/keybinds.html
 ```
 
-`alt + /` opens that last one — a themed cheatsheet of every binding, generated
-from the same palette as the borders. It's plain HTML opened in your browser, so
-it needs no terminal emulator and no extra dependency.
+`alt + /` opens the cheatsheet — a themed list of every binding, generated from
+the same palette as the borders, shown as a **centred floating window**.
+
+Getting it to float takes three steps, and each one is load-bearing:
+
+1. **Open in Chromium app mode** (`--app=URL`) so it's a standalone window with
+   no tab strip, not a tab inside an existing browser window.
+2. **Float it explicitly** once it appears. An `[[on-window-detected]]` rule
+   can't do this: AeroSpace evaluates those the instant the window is created,
+   and a browser window has no title yet at that point — the page hasn't
+   loaded — so a title match never fires, and matching on app-id would float
+   every browser window you open.
+3. **Resize and centre it**, because AeroSpace keeps whatever size the window
+   had at the moment it was floated, and by then it's already been stretched to
+   fill its tile.
+
+Step 3 uses AppleScript with the browser name written in as a literal. Passing
+it as a variable (`tell application someVar`) stops AppleScript resolving the
+browser's scripting terminology at compile time, and `title of win` then fails
+with error `-1700`. All Chromium browsers share that terminology, so the
+literal is safe.
+
+Without a Chromium browser installed the cheatsheet still opens, just as an
+ordinary tab that doesn't float.
 
 ## Credits
 
